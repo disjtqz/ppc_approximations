@@ -33,65 +33,59 @@ static constexpr uint16_t offset_table[] = {
 static constexpr unsigned APPROX_TBL_BITS = 11;
 
 float vlogefp(float f) {
-	union {
-		float _f;
-		unsigned int _v;
-	}bitu;
-	bitu._f = f;
-	uint32_t float_bits = bitu._v;
+  union {
+    float _f;
+    unsigned int _v;
+  } bitu;
+  bitu._f = f;
+  uint32_t float_bits = bitu._v;
 
-	if (float_bits >> 31)
-	{
+  if (float_bits >> 31) {
+    // wronggg.
 
-		//wronggg. 
-		return .0f;
-	}
-	else {
+    // return .0f;
+    bitu._v |= 0xFF800000U;
+    return bitu._f;
+  } else {
+    uint32_t exp = float_bits >> 23;
 
-		uint32_t exp = float_bits >> 23;
+    int32_t exp_unbiased = static_cast<int32_t>(exp) - 127;
 
+    // todo: check out nan payloads
 
-		int32_t exp_unbiased = static_cast<int32_t>(exp) - 127;
+    if (!exp) {
+      bitu._v = 0xFF800000U;
+      return bitu._f;
 
-		//todo: check out nan payloads
+    } else if (exp == 255) {
+      bitu._v = 0x7FC00000;
+      return bitu._f;
+    } else {
+      uint32_t mant = float_bits & ((1U << 23) - 1U);
 
-		if (!exp) {
-			bitu._v = 0xFF800000U;
-			return bitu._f;
+      uint32_t approxbits = mant >> (23 - APPROX_TBL_BITS);
+      uint32_t entry_word = (approxbits * 2) / 64;
+      uint16_t offset = offset_table[entry_word];
 
+      if (approxbits & 31) {
+        uint32_t bit_begin = (approxbits * 2) & 63;
 
-		}
-		else if (exp == 255) {
-			bitu._v = 0x7FC00FFF;
-			return bitu._f;
-		}
-		else {
-			uint32_t mant = float_bits & ((1U << 23) - 1U);
+        uint64_t diffset = get_diffset(entry_word);
 
-			uint32_t approxbits = mant >> (23 - APPROX_TBL_BITS);
-			uint32_t entry_word = (approxbits * 2) / 64;
-			uint16_t offset = offset_table[entry_word];
+        offset += diffset_sum(
+            diffset &
+            ((1ULL << (bit_begin)) -
+             1ULL));  // sum all preceeding entries in this 32 entry block
+      }
+      // i don't think double is actually necessary here.
 
-			if (approxbits & 31) {
+      double fractional_part = static_cast<float>(static_cast<int>(
+                                   static_cast<unsigned int>(offset))) /
+                               65536.0;
 
+      fractional_part += static_cast<double>(exp_unbiased);
 
-				uint32_t bit_begin = (approxbits * 2) & 63;
-
-				uint64_t diffset = get_diffset(entry_word);
-
-				offset += diffset_sum(diffset & ((1ULL << (bit_begin)) - 1ULL));//sum all preceeding entries in this 32 entry block
-			}
-			//i don't think double is actually necessary here.
-
-			double fractional_part = static_cast<float>(static_cast<int>(static_cast<unsigned int>(offset))) / 65536.0;
-
-			fractional_part += static_cast<double>(exp_unbiased);
-
-			return fractional_part;
-
-
-		}
-	}
-
-
+      return static_cast<float>(fractional_part);
+    }
+  }
 }
